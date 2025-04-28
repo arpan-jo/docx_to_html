@@ -14,7 +14,7 @@ const { modifyFootNoteLink, footNoteValues, removedOldFootNote } = require('./fo
  * @param {string} outputDir 
  * @param {string} fileName 
  */
-async function convertDocxToHtml(filePath, outputDir, fileName) {
+async function convertDocxToHtml(filePath, outputDir, fileName, level) {
     try {
 
         //docx file read
@@ -38,6 +38,7 @@ async function convertDocxToHtml(filePath, outputDir, fileName) {
                 "p[style-name='bookname'] => p.bookname:fresh",
                 "p[style-name='center'] => p.center:fresh",
                 "p[style-name='bookInfo'] => p.bookInfo:fresh",
+                "p[style-name='bookInfo 2'] => p.bookInfo-2:fresh",
                 "p => p.MsoNormal:fresh",
 
 
@@ -91,8 +92,10 @@ async function convertDocxToHtml(filePath, outputDir, fileName) {
             return match + "\n"
         })
 
+        html = cleanHeadingAnchors(html)
+        
         // table of content extracted
-        const toc = getTableOfContent(html)
+        const toc = getTableOfContent(html, level)
 
         // bookInfo extracted [বইয়ের নাম, লেখক ]
         const bookInfo = getBookInfo(html)
@@ -104,10 +107,14 @@ async function convertDocxToHtml(filePath, outputDir, fileName) {
         const slideArray = swiperWrapper(html)
 
 
-        fileName = fileName.replace('.docx', '')
-        const bookname = fileName.split('.')[1].trim()
+        //fileName => 01. খুদ্দক নিকায় ও অর্থকথা.docx
+       const fileNameInfo = fileName.replace('.docx', '').split('.')
+        
+        const bookname = fileNameInfo[1].trim()
 
-        const dataLocation = outputDir + "/" + fileName.split('.')[0]
+        const outputFileName = fileNameInfo[0].startsWith('0') ?  fileNameInfo[0].slice(1) : fileNameInfo[0]
+
+        const dataLocation = outputDir + "/" + outputFileName
 
         //removed unwanted text. like ভূমিকা, অনুবাদকের কথা... ইত্যাদি
         slideArray.shift()
@@ -132,10 +139,7 @@ async function convertDocxToHtml(filePath, outputDir, fileName) {
         })
 
 
-
-        fs.writeFileSync(`./output/${outputDir}/${fileName.split('.')[0]}.html`, content);
-
-        console.log('Conversion successful!' + `/output/${outputDir}/${fileName.split('.')[0]}.html`);
+        console.log('Conversion successful!' + `/output/${outputDir}/${outputFileName}.html`);
     } catch (err) {
         console.error('Error converting file:', err);
     }
@@ -172,6 +176,7 @@ function formatHeading(html) {
            return line.replace(
                 /<h([1-4])><a id="([^"]+)"><\/a>(.*?)<\/h\1>/i,
                 (_, level, id, text) => {
+                    text = text.replace(/<\/?b>/gi, '');
                     return `<h${level} align=center style='margin-top:0in;text-align:center'><a id="${id}"></a><b>${text}</b></h${level}>`;
                 }
             );
@@ -180,6 +185,39 @@ function formatHeading(html) {
     return withFormatHtml.join('\n')
 
 }
+
+
+function cleanHeadingAnchors(html) {
+    let uniqueIdCounter = 1; // uid counter
+
+    return html.replace(/<(h[1-6])([^>]*)>(.*?)<\/\1>/gis, (match, tag, attrs, content) => {
+        // all <a> capture
+        let aTags = [...content.matchAll(/<a\s+([^>]*)>(.*?)<\/a>/gis)];
+        
+        if (aTags.length > 0) {
+            // If there is more than one a
+            let idTag = aTags.find(([full, attrs]) => /id\s*=/.test(attrs));
+
+            if (!idTag) {
+                idTag = aTags[0]; // If there is no ID, keep the first one. 
+            }
+
+            // Remove all a tags
+            content = content.replace(/<a\s+[^>]*>(.*?)<\/a>/gis, '$1');
+
+            // Insert the a tag again which is have id attr
+            const [full, idAttrs, innerText] = idTag;
+            content = `<a ${idAttrs}></a>` + content;
+        } else {
+            // If there is no <a> tag, insert a tag with custom id.
+            const newId = `_customId${uniqueIdCounter++}`;
+            content = `<a id="${newId}"></a>` + content;
+        }
+
+        return `<${tag}${attrs}>${content}</${tag}>`;
+    });
+}
+
 
 /**
  * 
@@ -192,7 +230,7 @@ function swiperWrapper(html) {
     const slides = [];
     let currentSlide = [];
 
-    const isHeading = line => /^<h[1]/.test(line);
+    const isHeading = line => line.includes('[New Section]');
 
     const divEnd = `<br clear=all>
         <p class=MsoNormal style='text-align:justify;' align=left>&nbsp;</p>`
@@ -200,6 +238,7 @@ function swiperWrapper(html) {
     lines.forEach((line) => {
         if (isHeading(line)) {
             // console.log(line)
+            line = ''
             if (currentSlide.length > 0) {
                 slides.push(`<div class="swiper-slide">\n${currentSlide.join('\n')}\n ${divEnd}</div>`);
                 currentSlide = [];
@@ -214,13 +253,6 @@ function swiperWrapper(html) {
     }
 
 
-    const h2s = slides.map((line) => {
-
-        if (line.includes('</h3>')) {
-
-        }
-
-    })
 
     //console.log(slides)
     return slides;
@@ -232,7 +264,7 @@ function runall() {
     folders.forEach((child) => {
         child.files.forEach((file) => {
             const filePath = path.join(__dirname, "docx", child.sourceDir, file);
-            convertDocxToHtml(filePath, child.dir, file);
+            convertDocxToHtml(filePath, child.dir, file, 1);
         })
     })
 
@@ -243,7 +275,7 @@ function runall() {
 //   });
 
 const filePath = path.join(__dirname, "docx", folders[0].sourceDir, folders[0].files[1]);
- convertDocxToHtml(filePath, folders[0].dir, folders[0].files[1]);
+ convertDocxToHtml(filePath, folders[0].dir, folders[0].files[1], 1);
 
 
 // runall()
